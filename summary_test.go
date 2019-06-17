@@ -15,13 +15,3 @@ func  TestSummary(t *testing.T) {
 	b, _ := json.Marshal(sum)
 	println(string(b))
 }
-
-func TestIndex(t *testing.T) {
-	index, err := read_index("../sample/mc-4360-big-Index.db")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	b, _ := json.Marshal(index)
-	println(string(b))
-}

@@ -1,6 +1,7 @@
 package sstable
 
 import (
+	"fmt"
 	"encoding/binary"
 	"io/ioutil"
 )
@@ -45,11 +46,8 @@ func read_index(filepath string) ([]IndexEntry, error) {
 	}
 
 	index := make([]IndexEntry, 0)
-	// fill header
-	i := 100
 	for {
-		i--
-		if i == 0 {
+		if len(data) == 0 {
 			break
 		}
 		var entry IndexEntry
@@ -63,17 +61,13 @@ func read_index(filepath string) ([]IndexEntry, error) {
 		data = data[n2:]
 
 		entry.PromotedIndexLength = uint32(prom_index_len)
-		println("KEY", string(entry.Key), position, "PROM INDEX LEN", prom_index_len, "N", n, "N2", n2)
+		// fmt.Println("KEY", string(entry.Key), position, "PROM INDEX LEN", prom_index_len)
 
-		entry.PromotedIndex = data[:entry.PromotedIndexLength]
-
-		data = data[entry.PromotedIndexLength:]
+		entry.PromotedIndex = data[:prom_index_len]
+		data = data[prom_index_len:]
 		index = append(index, entry)
-		if len(data) == 0 {
-			println("KEY", string(entry.Key))
-			break
-		}
 	}
+	fmt.Println(len(index))
 	return nil, nil
 }
 
@@ -81,10 +75,8 @@ func read_index(filepath string) ([]IndexEntry, error) {
 // number of bytes read (> 0)
 // the internal representation of varints is explained in:
 // https://haaawk.github.io/2018/02/26/sstables-variant-integers.html
-// Note: the first byte of buf will be modified for performance reason
 func decodeVarint(buf []byte) (x uint64, n int) {
 	first := buf[0]
-
 	// reading 0 byte
 	if first&128 == 0 {
 		return uint64(first), 1
@@ -96,44 +88,72 @@ func decodeVarint(buf []byte) (x uint64, n int) {
 	}
 
 	// 2 bytes
-	if first&128 == 128 {
-		buf[0] &= 191
-		return uint64(binary.LittleEndian.Uint16(buf[0:2])), 2
+	if first&192 == 128 { // first & 1100 000 == 1000 0000
+		var b [2]byte
+		b[0] = buf[0] & 63 // 0011 1111
+		b[1] = buf[1]
+		return uint64(binary.LittleEndian.Uint16(b[:])), 2
 	}
 
 	// 3 bytes
-	if first&96 == 96 {
-		buf[0] &= 223
-		return uint64(binary.LittleEndian.Uint32(buf[0:3])), 3
+	if first&224 == 192 { //  first & 11100000 == 1100 0000
+		// fmt.Printf("%x %x %x", buf[0], buf[1], buf[2])
+		var b [4]byte
+		b[0] = 0
+		b[1] = buf[0] & 31 // 0001 1111
+		b[2] = buf[1]
+		b[3] = buf[2]
+		return uint64(binary.LittleEndian.Uint32(b[:])), 3
 	}
 
 	// 4 bytes
-	if first&224 == 224 {
-		buf[0] &= 239
-		return uint64(binary.LittleEndian.Uint32(buf[0:4])), 4
+	if first&240 == 224 { // 240: 11110000
+		var b [4]byte
+		b[0] = buf[0] & 15 // 0000 1111
+		b[1] = buf[1]
+		b[2] = buf[2]
+		b[3] = buf[3]
+		return uint64(binary.LittleEndian.Uint32(b[:])), 4
 	}
 
 	// 5 bytes
-	if first&240 == 240 {
-		buf[0] &= 247
-		return binary.LittleEndian.Uint64(buf[0:5]), 5
+	if first&248 == 240 { // 248: 11111000
+		var b [8]byte
+		b[3] = buf[0] & 7 // 0000 0111
+		b[4] = buf[1]
+		b[5] = buf[2]
+		b[6] = buf[3]
+		b[7] = buf[4]
+		return binary.LittleEndian.Uint64(b[:]), 5
 	}
 
 	// 6 bytes
-	if first&248 == 248 {
-		buf[0] &= 251
-		return binary.LittleEndian.Uint64(buf[0:6]), 6
+	if first&252 == 248 { // 252: 1111 1100
+		var b [8]byte
+		b[2] = buf[0] & 3 // 0000 0011
+		b[3] = buf[1]
+		b[4] = buf[2]
+		b[5] = buf[3]
+		b[6] = buf[4]
+		b[7] = buf[5]
+		return binary.LittleEndian.Uint64(b[:]), 6
 	}
 
 	// 7 bytes
-	if first&252 == 252 {
-		buf[0] &= 253
+	if first&254 == 252 { // 254: 1111 1110
+		var b [8]byte
+		b[1] = buf[0] & 1 // 0000 0001
+		b[2] = buf[1]
+		b[3] = buf[2]
+		b[4] = buf[3]
+		b[5] = buf[4]
+		b[6] = buf[5]
+		b[7] = buf[6]
 		return binary.LittleEndian.Uint64(buf[0:7]), 7
 	}
 
 	// 8 bytes
-	if first&254 == 254 {
-		buf[0] &= 254
+	if first&255 == 254 {
 		return binary.LittleEndian.Uint64(buf[0:8]), 8
 	}
 
